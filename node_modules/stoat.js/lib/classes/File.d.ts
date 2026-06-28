@@ -1,0 +1,64 @@
+import type { File as APIFile, Metadata } from "stoat-api";
+import type { Client } from "../Client.js";
+/**
+ * Uploaded File
+ */
+export declare class File {
+    #private;
+    /**
+     * File Id
+     */
+    readonly id: string;
+    /**
+     * File bucket
+     */
+    readonly tag: string;
+    /**
+     * Original filename
+     */
+    readonly filename?: string;
+    /**
+     * Parsed metadata of the file
+     */
+    readonly metadata: Metadata;
+    /**
+     * Raw content type of this file
+     */
+    readonly contentType?: string;
+    /**
+     * Size of the file (in bytes)
+     */
+    readonly size?: number;
+    /**
+     * Construct File
+     * @param client Client
+     * @param file File
+     */
+    constructor(client: Client, file: Pick<APIFile, "_id" | "tag" | "metadata"> & Partial<APIFile>);
+    /**
+     * Direct URL to the file
+     */
+    /**
+     * Preview URL for the file
+     */
+    get previewUrl(): string;
+    /**
+     * Original download URL for the file
+     */
+    get originalUrl(): string;
+    /**
+     * Human readable file size
+     */
+    get humanReadableSize(): string;
+    /**
+     * Whether this file should have a spoiler
+     */
+    get isSpoiler(): boolean;
+    /**
+     * Creates a URL to a given file with given options.
+     * @param forceAnimation Returns GIF if applicable (for avatars/icons)
+     * @returns Generated URL or nothing
+     */
+    createFileURL(forceAnimation?: boolean): string | undefined;
+}
+//# sourceMappingURL=File.d.ts.map

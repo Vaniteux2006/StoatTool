@@ -1,0 +1,89 @@
+import type { DataEditBot } from "stoat-api";
+import type { BotCollection } from "../collections/BotCollection.js";
+import type { BotFlags } from "../hydration/bot.js";
+import { PublicBot } from "./PublicBot.js";
+import type { User } from "./User.js";
+/**
+ * Bot Class
+ */
+export declare class Bot {
+    #private;
+    readonly id: string;
+    /**
+     * Construct Bot
+     * @param collection Collection
+     * @param id Id
+     */
+    constructor(collection: BotCollection, id: string);
+    /**
+     * Convert to string
+     * @returns String
+     */
+    toString(): string;
+    /**
+     * Whether this object exists
+     */
+    get $exists(): boolean;
+    /**
+     * Time when this user created their account
+     */
+    get createdAt(): Date;
+    /**
+     * Corresponding user
+     */
+    get user(): User | undefined;
+    /**
+     * Owner's Id
+     */
+    get ownerId(): string;
+    /**
+     * Owner
+     */
+    get owner(): User | undefined;
+    /**
+     * Bot Token
+     */
+    get token(): string;
+    /**
+     * Whether this bot can be invited by anyone
+     */
+    get public(): boolean;
+    /**
+     * Whether this bot has analytics enabled
+     */
+    get analytics(): boolean;
+    /**
+     * Whether this bot shows up on Discover
+     */
+    get discoverable(): boolean;
+    /**
+     * Interactions URL
+     */
+    get interactionsUrl(): string | undefined;
+    /**
+     * Link to terms of service
+     */
+    get termsOfServiceUrl(): string | undefined;
+    /**
+     * Link to privacy policy
+     */
+    get privacyPolicyUrl(): string | undefined;
+    /**
+     * Bot Flags
+     */
+    get flags(): BotFlags;
+    /**
+     * Instantiate `PublicBot` class from this bot
+     */
+    get publicBot(): PublicBot;
+    /**
+     * Edit a bot
+     * @param data Changes
+     */
+    edit(data: DataEditBot): Promise<void>;
+    /**
+     * Delete a bot
+     */
+    delete(): Promise<void>;
+}
+//# sourceMappingURL=Bot.d.ts.map
