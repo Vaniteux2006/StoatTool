@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { handleOCMessage } from './ocProxy.js';
 
 // Anti-spam simples por canal (mesma ideia do RPTool).
 const cooldowns = new Map();      // canalId -> timestamp em que o castigo expira
@@ -13,7 +14,12 @@ export async function handleMessageCreate(client, message) {
     // Ignora as próprias mensagens do bot (forma confiável, sem depender do cache).
     if (message.authorId === client.user?.id) return;
     if (typeof message.content !== 'string') return;
-    if (!message.content.startsWith(config.prefix)) return;
+
+    // Não é comando do bot? Tenta o proxy de OC (masquerade) e encerra.
+    if (!message.content.startsWith(config.prefix)) {
+        await handleOCMessage(client, message);
+        return;
+    }
 
     const channelId = message.channelId;
     const now = Date.now();
