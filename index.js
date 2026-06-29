@@ -6,8 +6,16 @@ client.on("ready", () => {
     console.log(`⚡ IT'S ALIVE! O bot ${client.user.username} nasceu e tá on!`);
 });
 
+// evita que um erro derrube o processo inteiro
+client.on("error", (err) => {
+    console.error("⚠️ Erro no client:", err);
+});
+
 client.on("messageCreate", async (message) => {
-    if (message.author.bot) return;
+    // ignora as próprias mensagens do bot
+    if (message.authorId === client.user?.id) return;
+    // ignora outros bots (author?. porque pode não estar no cache ainda)
+    if (message.author?.bot) return;
     if (typeof message.content !== 'string') return;
 
     console.log(`📨 Mensagem: "${message.content}"`);
