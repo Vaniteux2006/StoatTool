@@ -1,32 +1,38 @@
-import { Client } from "@stoatx/client";
+import { Client } from '@stoatx/client';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { config } from './config.js';
+import { loadCommands } from './handlers/commandLoader.js';
+import { handleMessageCreate } from './handlers/messageCreate.js';
+
+// __dirname não existe em ESM — recriamos a partir do import.meta.url.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const client = new Client();
+client.commands = new Map(); // registro de comandos: nome -> comando
 
-client.on("ready", () => {
+// Evita que um erro derrube o processo inteiro.
+client.on('error', (err) => {
+    console.error('⚠️ Erro no client:', err);
+});
+
+client.on('ready', () => {
     console.log(`⚡ IT'S ALIVE! O bot ${client.user.username} nasceu e tá on!`);
+    console.log(`🔧 Prefixo: "${config.prefix}" | ${client.commands.size} comando(s) carregado(s).`);
 });
 
-// evita que um erro derrube o processo inteiro
-client.on("error", (err) => {
-    console.error("⚠️ Erro no client:", err);
-});
+// Toda a lógica de roteamento de comandos vive em handlers/messageCreate.js.
+client.on('messageCreate', (message) => handleMessageCreate(client, message));
 
-client.on("messageCreate", async (message) => {
-    // ignora as próprias mensagens do bot
-    if (message.authorId === client.user?.id) return;
-    // ignora outros bots (author?. porque pode não estar no cache ainda)
-    if (message.author?.bot) return;
-    if (typeof message.content !== 'string') return;
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+console.log('📂 Carregando comandos...');
+await loadCommands(client, path.join(__dirname, 'commands'));
 
-    console.log(`📨 Mensagem: "${message.content}"`);
+if (!config.token) {
+    console.error('❌ TOKEN não encontrado no .env. Bot não pode iniciar.');
+    process.exit(1);
+}
 
-    if (message.content.toLowerCase() === '!ping') {
-        await message.channel.send('🏓 Pong!');
-        console.log('Respondido!');
-    }
-});
-
-const MEU_TOKEN = 'qz3sg7uyBjIwVuW3wVSewT9MKgabk75ltb8S3nPLNkVcrdzkKsHR3HRUsvDxas35';
-
-console.log("⏳ Tentando conectar...");
-client.login(MEU_TOKEN);
+console.log('⏳ Tentando conectar...');
+client.login(config.token);
