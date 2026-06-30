@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { loadCommands } from './handlers/commandLoader.js';
 import { handleMessageCreate } from './handlers/messageCreate.js';
 
+
 // __dirname não existe em ESM — recriamos a partir do import.meta.url.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
