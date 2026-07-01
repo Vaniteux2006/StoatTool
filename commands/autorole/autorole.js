@@ -1,4 +1,4 @@
-// commands/autorole.js
+// commands/administracao/autorole.js
 //
 // rp!autorole entrada <cargo|id>
 // rp!autorole reagir <id-mensagem> <cargo|id> <emoji>
@@ -6,10 +6,22 @@
 // rp!autorole status <cargo|id>
 // rp!autorole help
 //
-// Apenas Administradores podem usar. Segue o contrato do commandLoader:
-// export default { name, execute }.
+// Feito para STOAT (stoat.js), não discord.js.
+// Só quem tem permissão ManageServer (ou é dono do servidor) pode usar.
+// Segue o contrato do commandLoader: export default { name, execute }.
+//
+// IMPORTANTE: as classes do stoat.js (Message, Server, ServerMember...) não
+// expõem o client publicamente, então este arquivo NÃO consegue se auto-
+// registrar nos eventos de serverMemberJoin / reação sozinho. Você precisa
+// chamar registerEvents(client) UMA VEZ no seu index.js, por exemplo:
+//
+//   import autorole from './commands/administracao/autorole.js';
+//   client.on('ready', () => autorole.registerEvents(client));
+//
+// Sem essa linha, os subcomandos "entrada" e "reagir" salvam a config
+// normalmente, mas o cargo automático (entrada de membro / reação) nunca
+// dispara.
 
-import { PermissionsBitField, EmbedBuilder } from 'discord.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,6 +29,11 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'autorole.json');
+
+// IDs no Stoat são ULIDs (ex: 01JTTSRP73PQ5SGG0SQ1XPKN1D) — alfanuméricos,
+// não numéricos como no Discord. Aceita ID cru ou menção <%id>.
+const ID_RE = /^[0-9A-HJKMNP-TV-Z]{20,30}$/i;
+const ROLE_MENTION_RE = /^<%([0-9A-HJKMNP-TV-Z]{20,30})>$/i;
 
 // ---------- Persistência ----------
 
@@ -39,59 +56,54 @@ function saveData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-function getGuildConfig(data, guildId) {
-  if (!data[guildId]) {
-    data[guildId] = { entrada: null, reagir: [] };
-  }
-  if (!data[guildId].reagir) data[guildId].reagir = [];
-  return data[guildId];
+function getGuildConfig(data, serverId) {
+  if (!data[serverId]) data[serverId] = { entrada: null, reagir: [] };
+  if (!data[serverId].reagir) data[serverId].reagir = [];
+  return data[serverId];
 }
 
 // ---------- Helpers ----------
 
-function resolveRole(message, arg) {
+function resolveRole(server, arg) {
   if (!arg) return null;
-  const mentionMatch = arg.match(/^<@&(\d+)>$/);
-  const roleId = mentionMatch ? mentionMatch[1] : arg.replace(/\D/g, '');
-  if (!roleId) return null;
-  return message.guild.roles.cache.get(roleId) || null;
+  const mentionMatch = arg.match(ROLE_MENTION_RE);
+  const roleId = mentionMatch ? mentionMatch[1] : arg.trim();
+  if (!ID_RE.test(roleId)) return null;
+  const role = server.roles.get(roleId);
+  if (!role) return null;
+  return { id: roleId, ...role };
 }
 
 function isAdmin(message) {
-  return message.member.permissions.has(PermissionsBitField.Flags.Administrator);
+  const member = message.member;
+  const server = message.server;
+  if (!member || !server) return false;
+  if (server.ownerId === message.authorId) return true;
+  return member.hasPermission(server, 'ManageServer');
 }
 
-function botCanAssign(message, role) {
-  const botMember = message.guild.members.me;
-  if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-    return { ok: false, reason: 'Eu não tenho a permissão **Gerenciar Cargos** neste servidor.' };
-  }
-  if (role.position >= botMember.roles.highest.position) {
-    return { ok: false, reason: `Meu cargo mais alto precisa estar **acima** do cargo ${role.name} na lista de cargos.` };
-  }
-  if (role.managed) {
-    return { ok: false, reason: 'Esse cargo é gerenciado automaticamente (bot/integração) e não pode ser atribuído manualmente.' };
+function botCanAssignRoles(message) {
+  const server = message.server;
+  if (!server.havePermission('AssignRoles')) {
+    return { ok: false, reason: 'Eu não tenho a permissão **Assign Roles** neste servidor.' };
   }
   return { ok: true };
 }
 
-async function findMessageInGuild(guild, messageId, preferredChannel) {
+async function findMessageInServer(server, messageId, preferredChannel) {
   if (preferredChannel) {
     try {
-      const msg = await preferredChannel.messages.fetch(messageId);
+      const msg = await preferredChannel.fetchMessage(messageId);
       if (msg) return { message: msg, channel: preferredChannel };
     } catch {
       // segue tentando outros canais
     }
   }
 
-  const channels = guild.channels.cache.filter(
-    (c) => c.isTextBased && c.isTextBased() && c.viewable
-  );
-
-  for (const channel of channels.values()) {
+  for (const channel of server.channels) {
+    if (channel.id === preferredChannel?.id) continue;
     try {
-      const msg = await channel.messages.fetch(messageId);
+      const msg = await channel.fetchMessage(messageId);
       if (msg) return { message: msg, channel };
     } catch {
       continue;
@@ -100,46 +112,40 @@ async function findMessageInGuild(guild, messageId, preferredChannel) {
   return null;
 }
 
-// ---------- Embed de ajuda ----------
+function embed(title, description, colour) {
+  return { title, description, colour };
+}
 
 function helpEmbed(prefix = 'rp!') {
-  return new EmbedBuilder()
-    .setTitle('📋 Ajuda — Autorole')
-    .setDescription('Comandos disponíveis (apenas Administradores podem usá-los):')
-    .addFields(
-      {
-        name: `${prefix}autorole entrada <cargo|id>`,
-        value: 'Define um cargo que será dado automaticamente a todo membro que entrar no servidor.',
-      },
-      {
-        name: `${prefix}autorole reagir <id-mensagem> <cargo|id> <emoji>`,
-        value: 'Configura um cargo por reação: quem reagir com o emoji na mensagem indicada recebe o cargo (e perde ao remover a reação).',
-      },
-      {
-        name: `${prefix}autorole all <cargo|id>`,
-        value: 'Atribui o cargo informado a **todos** os membros atuais do servidor.',
-      },
-      {
-        name: `${prefix}autorole status <cargo|id>`,
-        value: 'Mostra a lista de membros que atualmente possuem o cargo informado.',
-      }
-    )
-    .setColor(0x5865f2)
-    .setFooter({ text: 'Exemplo: rp!autorole entrada @Membro' });
+  const lines = [
+    `**${prefix}autorole entrada <cargo|id>**`,
+    'Define um cargo que será dado automaticamente a todo membro que entrar no servidor.',
+    '',
+    `**${prefix}autorole reagir <id-mensagem> <cargo|id> <emoji>**`,
+    'Configura um cargo por reação: quem reagir com o emoji na mensagem indicada recebe o cargo (e perde ao remover a reação).',
+    '',
+    `**${prefix}autorole all <cargo|id>**`,
+    'Atribui o cargo informado a **todos** os membros atuais do servidor.',
+    '',
+    `**${prefix}autorole status <cargo|id>**`,
+    'Mostra a lista de membros que atualmente possuem o cargo informado.',
+  ].join('\n');
+
+  return embed('📋 Ajuda — Autorole', lines, '#5865f2');
 }
 
 // ---------- Subcomandos ----------
 
 async function cmdEntrada(message, args, data) {
-  const role = resolveRole(message, args[0]);
+  const role = resolveRole(message.server, args[0]);
   if (!role) {
-    return message.reply('⚠️ Você precisa mencionar um cargo ou passar o ID dele. Ex: `rp!autorole entrada @Membro`');
+    return message.reply('⚠️ Você precisa mencionar um cargo ou passar o ID dele. Ex: `rp!autorole entrada %Membro` ou o ID do cargo.');
   }
 
-  const check = botCanAssign(message, role);
+  const check = botCanAssignRoles(message);
   if (!check.ok) return message.reply(`❌ ${check.reason}`);
 
-  const guildConfig = getGuildConfig(data, message.guild.id);
+  const guildConfig = getGuildConfig(data, message.server.id);
   guildConfig.entrada = role.id;
   saveData(data);
 
@@ -150,22 +156,20 @@ async function cmdReagir(message, args, data) {
   const [messageId, roleArg, emoji] = args;
 
   if (!messageId || !roleArg || !emoji) {
-    return message.reply(
-      '⚠️ Uso correto: `rp!autorole reagir <id-mensagem> <cargo|id> <emoji>`'
-    );
+    return message.reply('⚠️ Uso correto: `rp!autorole reagir <id-mensagem> <cargo|id> <emoji>`');
   }
 
-  if (!/^\d{17,20}$/.test(messageId)) {
+  if (!ID_RE.test(messageId)) {
     return message.reply('⚠️ O ID da mensagem parece inválido.');
   }
 
-  const role = resolveRole(message, roleArg);
+  const role = resolveRole(message.server, roleArg);
   if (!role) return message.reply('⚠️ Cargo inválido. Mencione o cargo ou informe o ID dele.');
 
-  const check = botCanAssign(message, role);
+  const check = botCanAssignRoles(message);
   if (!check.ok) return message.reply(`❌ ${check.reason}`);
 
-  const found = await findMessageInGuild(message.guild, messageId, message.channel);
+  const found = await findMessageInServer(message.server, messageId, message.channel);
   if (!found) {
     return message.reply('❌ Não encontrei nenhuma mensagem com esse ID nos canais que consigo ver.');
   }
@@ -173,10 +177,10 @@ async function cmdReagir(message, args, data) {
   try {
     await found.message.react(emoji);
   } catch {
-    return message.reply('❌ Não consegui reagir com esse emoji. Verifique se ele é válido (emoji padrão do Discord ou emoji custom deste servidor).');
+    return message.reply('❌ Não consegui reagir com esse emoji. Verifique se ele é válido (emoji padrão ou emoji custom deste servidor) e se tenho a permissão **React**.');
   }
 
-  const guildConfig = getGuildConfig(data, message.guild.id);
+  const guildConfig = getGuildConfig(data, message.server.id);
 
   guildConfig.reagir = guildConfig.reagir.filter(
     (r) => !(r.messageId === messageId && r.emoji === emoji)
@@ -196,64 +200,74 @@ async function cmdReagir(message, args, data) {
   );
 }
 
-async function cmdAll(message, args, data) {
-  const role = resolveRole(message, args[0]);
-  if (!role) return message.reply('⚠️ Mencione o cargo ou informe o ID dele. Ex: `rp!autorole all @Membro`');
+async function cmdAll(message, args) {
+  const role = resolveRole(message.server, args[0]);
+  if (!role) return message.reply('⚠️ Mencione o cargo ou informe o ID dele. Ex: `rp!autorole all <id-do-cargo>`');
 
-  const check = botCanAssign(message, role);
+  const check = botCanAssignRoles(message);
   if (!check.ok) return message.reply(`❌ ${check.reason}`);
 
-  const statusMsg = await message.reply(`⏳ Buscando membros do servidor...`);
+  const statusMsg = await message.reply('⏳ Buscando membros do servidor...');
 
-  let members;
+  let members, users;
   try {
-    members = await message.guild.members.fetch();
+    ({ members, users } = await message.server.fetchMembers());
   } catch {
-    return statusMsg.edit('❌ Não consegui buscar a lista de membros do servidor.');
+    return statusMsg
+      ? statusMsg.edit({ content: '❌ Não consegui buscar a lista de membros do servidor.' })
+      : message.channel.sendMessage('❌ Não consegui buscar a lista de membros do servidor.');
   }
 
-  const membersToAdd = members.filter((m) => !m.user.bot && !m.roles.cache.has(role.id));
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const membersToAdd = members.filter((m) => {
+    const u = userMap.get(m.id.user);
+    return !(u && u.bot) && !m.roles.includes(role.id);
+  });
 
   let success = 0;
   let fail = 0;
 
-  await statusMsg.edit(`⏳ Atribuindo cargo **${role.name}** a ${membersToAdd.size} membro(s)...`);
-
-  for (const member of membersToAdd.values()) {
+  for (const member of membersToAdd) {
     try {
-      await member.roles.add(role);
+      await member.edit({ roles: [...member.roles, role.id] });
       success++;
     } catch {
       fail++;
     }
   }
 
-  return statusMsg.edit(
+  const resultText =
     `✅ Concluído! Cargo **${role.name}** atribuído a **${success}** membro(s).` +
-      (fail > 0 ? ` ⚠️ Falhou em **${fail}** membro(s).` : '')
-  );
+    (fail > 0 ? ` ⚠️ Falhou em **${fail}** membro(s).` : '');
+
+  return statusMsg
+    ? statusMsg.edit({ content: resultText })
+    : message.channel.sendMessage(resultText);
 }
 
 async function cmdStatus(message, args) {
-  const role = resolveRole(message, args[0]);
-  if (!role) return message.reply('⚠️ Mencione o cargo ou informe o ID dele. Ex: `rp!autorole status @Membro`');
+  const role = resolveRole(message.server, args[0]);
+  if (!role) return message.reply('⚠️ Mencione o cargo ou informe o ID dele. Ex: `rp!autorole status <id-do-cargo>`');
 
-  const statusMsg = await message.reply('⏳ Buscando membros...');
-
-  let members;
+  let members, users;
   try {
-    members = await message.guild.members.fetch();
+    ({ members, users } = await message.server.fetchMembers());
   } catch {
-    return statusMsg.edit('❌ Não consegui buscar a lista de membros do servidor.');
+    return message.reply('❌ Não consegui buscar a lista de membros do servidor.');
   }
 
-  const withRole = members.filter((m) => m.roles.cache.has(role.id));
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const withRole = members.filter((m) => m.roles.includes(role.id));
 
-  if (withRole.size === 0) {
-    return statusMsg.edit(`ℹ️ Nenhum membro possui o cargo **${role.name}** no momento.`);
+  if (withRole.length === 0) {
+    return message.reply(`ℹ️ Nenhum membro possui o cargo **${role.name}** no momento.`);
   }
 
-  const names = withRole.map((m) => `• ${m.user.tag} (${m.id})`);
+  const names = withRole.map((m) => {
+    const u = userMap.get(m.id.user);
+    const tag = u ? `${u.username}#${u.discriminator}` : m.id.user;
+    return `• ${tag} (${m.id.user})`;
+  });
 
   const chunks = [];
   let current = '';
@@ -267,15 +281,16 @@ async function cmdStatus(message, args) {
   if (current) chunks.push(current);
 
   for (let i = 0; i < chunks.length; i++) {
-    const embed = new EmbedBuilder()
-      .setTitle(`👥 Membros com o cargo ${role.name} (${withRole.size} total)`)
-      .setDescription(chunks[i])
-      .setColor(role.color || 0x5865f2);
+    const em = embed(
+      `👥 Membros com o cargo ${role.name} (${withRole.length} total)`,
+      chunks[i],
+      role.colour || '#5865f2'
+    );
 
     if (i === 0) {
-      await statusMsg.edit({ content: null, embeds: [embed] });
+      await message.reply({ embeds: [em] });
     } else {
-      await message.channel.send({ embeds: [embed] });
+      await message.channel.sendMessage({ embeds: [em] });
     }
   }
 }
@@ -287,80 +302,69 @@ function registerEvents(client) {
   if (client.__autoroleEventsRegistered) return;
   client.__autoroleEventsRegistered = true;
 
-  client.on('guildMemberAdd', async (member) => {
+  client.on('serverMemberJoin', async (member) => {
     try {
+      const server = member.server;
+      if (!server) return;
+
       const data = loadData();
-      const guildConfig = data[member.guild.id];
+      const guildConfig = data[server.id];
       if (!guildConfig || !guildConfig.entrada) return;
 
-      const role = member.guild.roles.cache.get(guildConfig.entrada);
+      const role = server.roles.get(guildConfig.entrada);
       if (!role) return;
 
-      await member.roles.add(role).catch(() => {});
+      await member.edit({ roles: [...member.roles, guildConfig.entrada] }).catch(() => {});
     } catch (err) {
-      console.error('[autorole] erro em guildMemberAdd:', err);
+      console.error('[autorole] erro em serverMemberJoin:', err);
     }
   });
 
-  client.on('messageReactionAdd', async (reaction, user) => {
+  client.on('messageReactionAdd', async (message, userId, emoji) => {
     try {
-      if (user.bot) return;
-      if (reaction.partial) await reaction.fetch().catch(() => null);
-      if (reaction.message.partial) await reaction.message.fetch().catch(() => null);
-      if (!reaction.message.guild) return;
+      const server = message.server;
+      if (!server) return;
 
       const data = loadData();
-      const guildConfig = data[reaction.message.guild.id];
+      const guildConfig = data[server.id];
       if (!guildConfig || !guildConfig.reagir?.length) return;
 
-      const emojiKey = reaction.emoji.id
-        ? `<:${reaction.emoji.name}:${reaction.emoji.id}>`
-        : reaction.emoji.name;
-
       const config = guildConfig.reagir.find(
-        (r) =>
-          r.messageId === reaction.message.id &&
-          (r.emoji === emojiKey || r.emoji === reaction.emoji.name)
+        (r) => r.messageId === message.id && r.emoji === emoji
       );
       if (!config) return;
 
-      const member = await reaction.message.guild.members.fetch(user.id).catch(() => null);
-      const role = reaction.message.guild.roles.cache.get(config.roleId);
-      if (!member || !role) return;
+      const member = await server.fetchMember(userId).catch(() => null);
+      if (!member || member.user?.bot) return;
+      if (member.roles.includes(config.roleId)) return;
 
-      await member.roles.add(role).catch(() => {});
+      await member.edit({ roles: [...member.roles, config.roleId] }).catch(() => {});
     } catch (err) {
       console.error('[autorole] erro em messageReactionAdd:', err);
     }
   });
 
-  client.on('messageReactionRemove', async (reaction, user) => {
+  client.on('messageReactionRemove', async (message, userId, emoji) => {
     try {
-      if (user.bot) return;
-      if (reaction.partial) await reaction.fetch().catch(() => null);
-      if (reaction.message.partial) await reaction.message.fetch().catch(() => null);
-      if (!reaction.message.guild) return;
+      const server = message.server;
+      if (!server) return;
 
       const data = loadData();
-      const guildConfig = data[reaction.message.guild.id];
+      const guildConfig = data[server.id];
       if (!guildConfig || !guildConfig.reagir?.length) return;
 
-      const emojiKey = reaction.emoji.id
-        ? `<:${reaction.emoji.name}:${reaction.emoji.id}>`
-        : reaction.emoji.name;
-
       const config = guildConfig.reagir.find(
-        (r) =>
-          r.messageId === reaction.message.id &&
-          (r.emoji === emojiKey || r.emoji === reaction.emoji.name)
+        (r) => r.messageId === message.id && r.emoji === emoji
       );
       if (!config) return;
 
-      const member = await reaction.message.guild.members.fetch(user.id).catch(() => null);
-      const role = reaction.message.guild.roles.cache.get(config.roleId);
-      if (!member || !role) return;
+      const member = await server.fetchMember(userId).catch(() => null);
+      if (!member) return;
+      if (!member.roles.includes(config.roleId)) return;
 
-      await member.roles.remove(role).catch(() => {});
+      await member
+        .edit({ roles: member.roles.filter((r) => r !== config.roleId) })
+        .catch(() => {});
     } catch (err) {
       console.error('[autorole] erro em messageReactionRemove:', err);
     }
@@ -372,14 +376,15 @@ function registerEvents(client) {
 export default {
   name: 'autorole',
   description: 'Configura cargo automático de entrada, cargo por reação, atribuição em massa e status de um cargo.',
+  // Exportado para você registrar uma única vez no seu index.js — veja
+  // instruções no topo do arquivo. O commandLoader ignora esta propriedade
+  // extra, então não quebra nada mesmo se você não usar.
+  registerEvents,
   async execute(message, args) {
-    if (!message.guild) return;
-
-    // Garante que os listeners de guildMemberAdd/reação estão ativos.
-    registerEvents(message.client);
+    if (!message.server) return;
 
     if (!isAdmin(message)) {
-      return message.reply('🚫 Apenas administradores podem usar o comando `autorole`.');
+      return message.reply('🚫 Apenas quem tem permissão de Gerenciar Servidor pode usar o comando `autorole`.');
     }
 
     const sub = (args[0] || '').toLowerCase();
@@ -392,16 +397,14 @@ export default {
       case 'reagir':
         return cmdReagir(message, rest, data);
       case 'all':
-        return cmdAll(message, rest, data);
+        return cmdAll(message, rest);
       case 'status':
         return cmdStatus(message, rest);
       case 'help':
       case '':
         return message.reply({ embeds: [helpEmbed()] });
       default:
-        return message.reply(
-          '⚠️ Subcomando desconhecido. Use `rp!autorole help` para ver a lista de comandos.'
-        );
+        return message.reply('⚠️ Subcomando desconhecido. Use `rp!autorole help` para ver a lista de comandos.');
     }
   },
 };

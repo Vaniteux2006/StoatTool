@@ -36,6 +36,9 @@ client.on('ready', () => {
     console.log(`🔧 Prefixo: "${config.prefix}" | ${client.commands.size} comando(s) carregado(s).`);
 });
 
+// Sem essa linha, entrada e reagir salvam a configuração normalmente, mas o cargo automático nunca dispara.
+client.on('ready', () => autorole.registerEvents(client));
+
 // Toda a lógica de roteamento de comandos vive em handlers/messageCreate.js.
 client.on('messageCreate', (message) => handleMessageCreate(client, message));
 
