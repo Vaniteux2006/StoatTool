@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { loadCommands } from './handlers/commandLoader.js';
 import { handleMessageCreate } from './handlers/messageCreate.js';
+import { loadLibs } from "./handlers/loadLibs.js";
+
 
 
 // __dirname não existe em ESM — recriamos a partir do import.meta.url.
@@ -29,6 +31,8 @@ client.on('messageCreate', (message) => handleMessageCreate(client, message));
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 console.log('📂 Carregando comandos...');
 await loadCommands(client, path.join(__dirname, 'commands'));
+await loadLibs();
+await loadCommands(client);
 
 if (!config.token) {
     console.error('❌ TOKEN não encontrado no .env. Bot não pode iniciar.');
