@@ -9,6 +9,19 @@ const commandStrikes = new Map(); // canalId -> lista de timestamps recentes
 // Tudo que envolve "chegou uma mensagem → é um comando? qual? executa" fica aqui.
 // O index.js só conecta este handler ao evento messageCreate.
 export async function handleMessageCreate(client, message) {
+    // ─── Casca externa à prova de bala ────────────────────────────────────────
+    // TODO o roteamento vive dentro deste try. Qualquer erro que escape de um
+    // handler específico é logado com rótulo [messageCreate] e o bot segue vivo.
+    // (Além disso, o index.js tem redes globais de uncaughtException como último
+    //  paraquedas — aqui é a primeira linha de defesa, mais próxima da causa.)
+    try {
+        await routeMessage(client, message);
+    } catch (err) {
+        console.error('❌ [messageCreate] Erro não tratado no roteamento:', err);
+    }
+}
+
+async function routeMessage(client, message) {
     // author?. porque o autor pode ainda não estar no cache (evita o TypeError).
     if (message.author?.bot) return;
     // Ignora as próprias mensagens do bot (forma confiável, sem depender do cache).
@@ -17,7 +30,13 @@ export async function handleMessageCreate(client, message) {
 
     // Não é comando do bot? Tenta o proxy de OC (masquerade) e encerra.
     if (!message.content.startsWith(config.prefix)) {
-        await handleOCMessage(client, message);
+        // O proxy de OC já tem try/catch interno, mas isolamos aqui também pra
+        // garantir que um erro dele nunca vaze pro resto do fluxo.
+        try {
+            await handleOCMessage(client, message);
+        } catch (err) {
+            console.error('❌ [messageCreate/OC] Erro no proxy de OC:', err);
+        }
         return;
     }
 
