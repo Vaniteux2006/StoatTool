@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { loadCommands } from './handlers/commandLoader.js';
 import { handleMessageCreate } from './handlers/messageCreate.js';
+import { registerImgReactions } from './handlers/imgReactions.js';
 
 
 
@@ -37,6 +38,9 @@ client.on('ready', () => {
 
 // Toda a lógica de roteamento de comandos vive em handlers/messageCreate.js.
 client.on('messageCreate', (message) => handleMessageCreate(client, message));
+
+// Navegação por reações do rp!img (⬅️🔀➡️🗑️).
+registerImgReactions(client);
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 // O carregamento é blindado: se UM comando falhar ao carregar (ex: import de um

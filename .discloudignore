@@ -1,0 +1,11 @@
+# Não suba node_modules: o Discloud roda `npm install` no Linux e assim o
+# youtube-dl-exec baixa o binário do yt-dlp certo pro Linux (o local é .exe/Windows).
+node_modules
+
+# Lixo que não precisa ir pro host
+.git
+*.log
+tmp
+data/*.tmp
+
+# NÃO ignore o cookies.txt — ele precisa subir pro Instagram funcionar no host.

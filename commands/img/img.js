@@ -1,66 +1,71 @@
-import { EmbedBuilder } from '@stoatx/client';
-import { fetchRemoteFile, isImageMime } from '../../lib/fetchRemoteFile.js';
+import { searchImages } from '../../lib/imageSearch.js';
+import { resolveImage, buildEmbed } from '../../lib/imgRender.js';
+import { createSession } from '../../lib/imgSessions.js';
+import { BTN_ORDER } from '../../lib/imgButtons.js';
 
-const URL_REGEX = /^https?:\/\/\S+$/i;
-
-// ─── rp!img <link> [legenda] ──────────────────────────────────────────────────
-// Exibe uma imagem de um link (ou de um anexo da própria mensagem) num card
-// (embed). A imagem é baixada e re-hospedada no CDN do Stoat, então continua
-// aparecendo mesmo que o link original saia do ar depois.
-//
-// Detalhe da lib: embed.setMedia() precisa de um fileId do CDN, não de uma URL
-// externa. Por isso subimos o arquivo com client.rest.uploadFile() antes.
+// ─── rp!img <busca> ───────────────────────────────────────────────────────────
+// Busca imagens no Bing e mostra num card navegável com botões de reação
+// (⬅️ anterior, 🔀 aleatório, ➡️ próximo, 🗑️ apagar), estilo NotSoBot.
+// A navegação em si é tratada em handlers/imgReactions.js.
 export default {
     name: 'img',
     aliases: ['imagem', 'image'],
-    description: 'Exibe uma imagem de um link num card. Ex: rp!img https://site.com/gato.png',
+    description: 'Busca imagens e mostra num card navegável. Ex: rp!img gato preto',
 
     async execute(message, args, client) {
-        // Link no texto? Se não, usa o primeiro anexo de imagem da mensagem.
-        let url = args.find((a) => URL_REGEX.test(a));
-        const legenda = args.filter((a) => a !== url).join(' ').trim();
+        const query = args.join(' ').trim();
 
-        if (!url && message.attachments?.length) {
-            url = message.attachments[0].url;
-        }
-
-        if (!url) {
-            await message
-                .reply('Manda o **link da imagem** (ou anexe uma). Ex: `rp!img https://site.com/gato.png`')
-                .catch(() => {});
+        if (!query) {
+            await message.reply('O que você quer buscar? Ex: `rp!img gato preto`').catch(() => {});
             return;
         }
 
         let status = null;
         try {
-            status = await message.reply('🖼️ Carregando imagem...');
+            status = await message.reply(`🔎 Buscando "${query}"...`);
         } catch (err) {
             console.error('[img] não consegui mandar o status:', err);
         }
 
         try {
-            const { buffer, filename, contentType } = await fetchRemoteFile(url);
-
-            if (!isImageMime(contentType)) {
-                throw new Error('esse link não parece ser uma imagem.');
+            const results = await searchImages(query);
+            if (!results.length) {
+                const aviso = `❌ Nada encontrado pra "${query}".`;
+                if (status) await status.edit(aviso).catch(() => {});
+                else await message.reply(aviso).catch(() => {});
+                return;
             }
 
-            // Sobe pro CDN pra conseguir o fileId que o embed exige.
-            const fileId = await client.rest.uploadFile('attachments', buffer, filename);
+            // Sessão montada antes de enviar; o handler de reações vê o mesmo objeto.
+            const session = {
+                results,
+                index: 0,
+                query,
+                ownerId: message.authorId,
+                channelId: message.channelId,
+                fileIds: {},
+                dead: new Set(),
+                message: null,
+            };
 
-            const embed = new EmbedBuilder()
-                .setTitle((legenda || filename).slice(0, 100))
-                .setColor('#3399ff')
-                .setMedia(fileId);
-            if (legenda) embed.setDescription(legenda);
+            // Resolve a primeira imagem exibível (pula quebradas a partir do índice 0).
+            const { index, fileId } = await resolveImage(client, session, 0, 1);
+            session.index = index;
 
             const channel = message.channel ?? (await client.channels.fetch(message.channelId));
-            await channel.send({ embeds: [embed] });
+            const sent = await channel.send(buildEmbed(session, fileId));
+            session.message = sent;
 
+            createSession(sent.id, session);
             if (status) await status.delete().catch(() => {});
+
+            // Adiciona os botões (em série, pra não tomar rate limit).
+            for (const emoji of BTN_ORDER) {
+                await sent.react(emoji).catch((e) => console.warn(`[img] não reagiu ${emoji}:`, e.message));
+            }
         } catch (err) {
-            console.error('[img] falhou ao exibir a imagem:', err);
-            const aviso = `❌ Não consegui exibir a imagem: ${err.message}`;
+            console.error('[img] falhou na busca:', err);
+            const aviso = `❌ Deu ruim na busca: ${err.message}`;
             if (status) await status.edit(aviso).catch(() => {});
             else await message.reply(aviso).catch(() => {});
         }

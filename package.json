@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@stoatx/client": "^0.8.0",
-    "stoat.js": "latest"
+    "stoat.js": "latest",
+    "youtube-dl-exec": "^3.1.8"
   }
 }

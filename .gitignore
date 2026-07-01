@@ -1,3 +1,10 @@
 node_modules/
 .env
 data/
+
+# Cookies do Instagram (yt-dlp) — SEGREDO, nunca versionar. Sobe só pro Discloud.
+cookies.txt
+
+# Temporários
+tmp/
+*.log
