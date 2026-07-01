@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { loadCommands } from './handlers/commandLoader.js';
 import { handleMessageCreate } from './handlers/messageCreate.js';
-import { loadLibs } from "./handlers/loadLibs.js";
+import { loadLibs } from "./handlers/LoadLibs.js";
 
 
 

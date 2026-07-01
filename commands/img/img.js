@@ -1,6 +1,6 @@
-import { searchImages } from "../lib/imageSearch.js";
-import { createSession } from "../lib/imgSessionStore.js";
-import { addAllButtons } from "../lib/messageActions.js";
+import { searchImages } from "../../lib/imageSearch.js";
+import { createSession } from "../../lib/imgSessionStore.js";
+import { addAllButtons } from "../../lib/messageActions.js";
 
 /**
  * Monta o payload de embed pro índice atual da sessão, no estilo do card do NotSoBot:

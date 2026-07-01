@@ -1,6 +1,6 @@
-import { downloadVideo, cleanupLocalFile } from "../lib/downloader.js";
-import { uploadToAutumn } from "../lib/uploader.js";
-import { scheduleMessageDeletion } from "../lib/cleanup.js";
+import { downloadVideo, cleanupLocalFile } from "../../lib/downloader.js";
+import { uploadToAutumn } from "../../lib/uploader.js";
+import { scheduleMessageDeletion } from ".././lib/cleanup.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
 
